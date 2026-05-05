@@ -1,6 +1,52 @@
-# Bonsplit
+# Bonsplit (Smart-Byte fork)
 
-A native macOS tab bar library with split pane support for SwiftUI applications.
+A native macOS tab bar library with split-pane support for SwiftUI
+applications.
+
+> **This is a fork of [almonk/bonsplit](https://github.com/almonk/bonsplit)**
+> maintained by [Smart-Byte GmbH](https://github.com/smart-byte) for use
+> in [Voilà](https://github.com/smart-byte/voila) and other Smart-Byte
+> products. Original work © Alasdair Monk; fork additions © 2026
+> Smart-Byte GmbH. Both the original and the fork are MIT licensed.
+>
+> The fork tracks upstream loosely — Smart-Byte cherry-picks fixes
+> rather than continuously rebasing on `almonk/main`. Upstream changes
+> we adopt are credited in `CHANGELOG.md`.
+
+## What's different in this fork
+
+Public API additions on top of upstream `1.1.1`:
+
+- `BonsplitController.onFocusChanged` — fires when the focused pane changes.
+- `BonsplitController.onForeignTabDrop` — for tab drops whose source pane lives in a different controller (i.e. another window). Enables seamless tab moves between windows without polling.
+- `BonsplitController.onUnacceptedDragEnd` — fires when a drag ends without any drop receiver consuming it. Lets the host implement tear-off into a new window.
+- `BonsplitController.onTabContextMenu` — host-supplied SwiftUI context-menu builder per tab.
+- `BonsplitController.insertExistingTab(...)` — preserve a `TabID` across controllers so host-side state keyed on it can follow the move.
+- `PaneID.id` and `TabID.id` are now public so hosts can map Bonsplit identities to their own registries.
+- `BonsplitDelegate` is `@MainActor`-isolated for Swift 6 strict concurrency.
+
+Drag and drop UX:
+
+- New `TabDragSource` (AppKit-backed `NSDraggingSource`) replaces SwiftUI's `.onDrag` for tabs. SwiftUI's drag has no end callback — `NSDraggingSession.endedAt(_:operation:)` is the only place we get a definitive signal with the final operation.
+- Drop overlay is mounted only while a tab drag is in flight. Previously SwiftUI silently registered the underlying `NSView` as `NSDraggingDestination` unconditionally and swallowed file/image drops targeting AppKit views below.
+- `TabDropLifecycle` and `PaneDropLifecycle` states gate `dropUpdated` callbacks so a stale notification can't re-arm the indicator after `performDrop`/`dropExited`.
+
+Layout stability:
+
+- `programmaticSyncDepth` guard prevents `NSSplitView` resize callbacks from racing each other when one `setPosition` fires while another is still on the stack.
+- Exact 50/50 split arithmetic accounts for divider thickness so the divider lands on the actual midpoint after rounding.
+- 0.5pt hysteresis on container-width tracking eliminates body re-render every frame on sub-pixel window resize.
+- `SplitAnimator` uses `nonisolated(unsafe)` on `CVDisplayLink` so its nonisolated `deinit` can stop the link without crossing actor isolation.
+
+Defaults:
+
+- Empty initial pane instead of a hardcoded "Welcome" tab — the right default for a generic library, hosts can populate as they wish.
+
+Tab transfer UTType:
+
+- Renamed identifier to `com.smartbyte.bonsplit.tabtransfer` (was `com.splittabbar.tabtransfer`). Hosts must add a matching `UTExportedTypeDeclarations` entry to their `Info.plist`. If you prefer your own namespace, the static identifier is a one-line override.
+
+See `CHANGELOG.md` for the per-release breakdown.
 
 ## Features
 
@@ -26,9 +72,12 @@ Add to your `Package.swift`:
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/almonk/bonsplit.git", from: "1.1.1")
+    .package(url: "https://github.com/smart-byte/bonsplit.git", from: "0.1.0")
 ]
 ```
+
+If you prefer the upstream library without the Smart-Byte additions,
+use `https://github.com/almonk/bonsplit.git` instead.
 
 Or in Xcode: File → Add Package Dependencies → Enter the repository URL.
 
