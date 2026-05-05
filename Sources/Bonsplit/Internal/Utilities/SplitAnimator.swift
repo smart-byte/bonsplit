@@ -1,12 +1,11 @@
-import Foundation
 import AppKit
-import QuartzCore
 import CoreVideo
+import Foundation
+import QuartzCore
 
 /// Animates split view divider positions with display-synced updates and pixel-perfect positioning
 @MainActor
 final class SplitAnimator {
-
     // MARK: - Types
 
     private struct Animation {
@@ -20,7 +19,9 @@ final class SplitAnimator {
 
     // MARK: - Properties
 
-    private var displayLink: CVDisplayLink?
+    // CVDisplayLink is a thread-safe CoreFoundation type; the nonisolated(unsafe)
+    // marker lets the nonisolated deinit read it to stop the link on tear-down.
+    private nonisolated(unsafe) var displayLink: CVDisplayLink?
     private var animations: [UUID: Animation] = [:]
 
     /// Shared animator instance
@@ -28,6 +29,7 @@ final class SplitAnimator {
 
     /// Animation duration in seconds
     nonisolated static let animationDuration: CFTimeInterval = 0.16
+
     // MARK: - Initialization
 
     private init() {

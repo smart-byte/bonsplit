@@ -5,7 +5,6 @@ import SwiftUI
 @MainActor
 @Observable
 public final class BonsplitController {
-
     // MARK: - Delegate
 
     /// Delegate for receiving callbacks about tab bar events
@@ -18,14 +17,82 @@ public final class BonsplitController {
 
     // MARK: - Internal State
 
-    internal var internalController: SplitViewController
+    var internalController: SplitViewController
+
+    /// Fired when the focused pane changes.
+    public var onFocusChanged: (() -> Void)?
+
+    /// Fired when a tab is dropped into one of this controller's panes
+    /// but the source pane lives somewhere else — typically another
+    /// window managed by a different `BonsplitController`. The host
+    /// app is responsible for finding the source controller, removing
+    /// the tab there, and (if needed) re-mapping any host-side state
+    /// (e.g. tab content registries) onto the new tab id.
+    ///
+    /// Parameters:
+    /// - `tab`: payload reconstructed from the drag pasteboard
+    /// - `sourcePaneId`: the UUID stored on the source side at drag start
+    /// - `destinationPaneId`: pane in *this* controller that received the drop
+    /// - `atIndex`: insertion index, or nil to append
+    public var onForeignTabDrop: ((Tab, _ sourcePaneId: UUID, _ destinationPaneId: PaneID, _ atIndex: Int?) -> Void)?
+
+    /// Fired when a tab drag started in this controller ends without
+    /// any drop receiver accepting it. Bonsplit gets the signal from
+    /// `NSDraggingSession.endedAt(_:operation:)` with `.none` — i.e.
+    /// the AppKit drag system itself confirms no destination consumed
+    /// the drop, no polling involved.
+    ///
+    /// The host app can use this to implement tab tear-off: when the
+    /// mouse is released outside every host window, the unaccepted
+    /// drag means the user wants a new window for the tab. If the
+    /// mouse is still over a host window (just on a non-droppable
+    /// region) the host typically does nothing.
+    ///
+    /// The `screenPoint` parameter is the mouse position at release in
+    /// Cocoa screen coordinates — convenient for placing a freshly
+    /// spawned window's top-left corner where the user dropped.
+    public var onUnacceptedDragEnd: ((Tab, _ sourcePaneId: PaneID, _ screenPoint: NSPoint) -> Void)?
+
+    /// Builds the contents of the right-click context menu shown on a
+    /// tab in the tab bar. Returning an empty `AnyView` (or leaving this
+    /// nil) yields no menu.
+    ///
+    /// `AnyView` is the pragmatic shape: it lets the host return arbitrary
+    /// SwiftUI content without forcing generics onto `BonsplitController`,
+    /// which is a stateful `@Observable` class whose generic shape would
+    /// cascade through every consumer.
+    public var onTabContextMenu: ((Tab, _ paneId: PaneID) -> AnyView)?
 
     // MARK: - Initialization
 
     /// Create a new controller with the specified configuration
     public init(configuration: BonsplitConfiguration = .default) {
         self.configuration = configuration
-        self.internalController = SplitViewController()
+        internalController = SplitViewController()
+
+        // Bridge internal foreign-drop notifications up to the public hook.
+        internalController.onForeignTabDrop = { [weak self] tabItem, sourcePaneId, destPaneId, atIndex in
+            guard let self else { return }
+            let publicTab = Tab(
+                id: TabID(id: tabItem.id),
+                title: tabItem.title,
+                icon: tabItem.icon,
+                isDirty: tabItem.isDirty
+            )
+            onForeignTabDrop?(publicTab, sourcePaneId, destPaneId, atIndex)
+        }
+
+        // Bridge internal "drag ended without a drop" up to the public hook.
+        internalController.onUnacceptedDragEnd = { [weak self] tabItem, sourcePaneId, screenPoint in
+            guard let self else { return }
+            let publicTab = Tab(
+                id: TabID(id: tabItem.id),
+                title: tabItem.title,
+                icon: tabItem.icon,
+                isDirty: tabItem.isDirty
+            )
+            onUnacceptedDragEnd?(publicTab, sourcePaneId, screenPoint)
+        }
     }
 
     // MARK: - Tab Operations
@@ -54,20 +121,20 @@ public final class BonsplitController {
         }
 
         // Calculate insertion index based on configuration
-        let insertIndex: Int?
-        switch configuration.newTabPosition {
+        let insertIndex: Int? = switch configuration.newTabPosition {
         case .current:
             // Insert after the currently selected tab
             if let paneState = internalController.rootNode.findPane(PaneID(id: targetPane.id)),
                let selectedTabId = paneState.selectedTabId,
-               let currentIndex = paneState.tabs.firstIndex(where: { $0.id == selectedTabId }) {
-                insertIndex = currentIndex + 1
+               let currentIndex = paneState.tabs.firstIndex(where: { $0.id == selectedTabId })
+            {
+                currentIndex + 1
             } else {
                 // No selected tab, append to end
-                insertIndex = nil
+                nil
             }
         case .end:
-            insertIndex = nil
+            nil
         }
 
         // Create internal TabItem
@@ -78,6 +145,33 @@ public final class BonsplitController {
         delegate?.splitTabBar(self, didCreateTab: tab, inPane: targetPane)
 
         return tabId
+    }
+
+    /// Insert an already-constructed tab into a pane while preserving
+    /// its original `TabID`. Used by cross-window drag handlers in the
+    /// host app: when a tab is moved between windows the tab keeps its
+    /// identity so host-side state (content registries, navigation
+    /// history, …) keyed on TabID can follow.
+    ///
+    /// Unlike `createTab(...)`, this does NOT consult
+    /// `delegate.shouldCreateTab` (the tab already exists logically —
+    /// the host has already approved it). It does fire `didCreateTab`
+    /// so observers see the tab appear in this controller.
+    /// - Returns: true if inserted, false if the destination pane was
+    ///   not found.
+    @discardableResult
+    public func insertTab(_ tab: Tab, inPane paneId: PaneID, atIndex index: Int? = nil) -> Bool {
+        guard let paneState = internalController.rootNode.findPane(PaneID(id: paneId.id)) else {
+            return false
+        }
+        let tabItem = TabItem(id: tab.id.id, title: tab.title, icon: tab.icon, isDirty: tab.isDirty)
+        if let index, index <= paneState.tabs.count {
+            paneState.insertTab(tabItem, at: index)
+        } else {
+            paneState.addTab(tabItem)
+        }
+        delegate?.splitTabBar(self, didCreateTab: tab, inPane: paneId)
+        return true
     }
 
     /// Update an existing tab's metadata
@@ -94,13 +188,13 @@ public final class BonsplitController {
     ) {
         guard let (pane, tabIndex) = findTabInternal(tabId) else { return }
 
-        if let title = title {
+        if let title {
             pane.tabs[tabIndex].title = title
         }
-        if let icon = icon {
+        if let icon {
             pane.tabs[tabIndex].icon = icon
         }
-        if let isDirty = isDirty {
+        if let isDirty {
             pane.tabs[tabIndex].isDirty = isDirty
         }
     }
@@ -113,19 +207,20 @@ public final class BonsplitController {
         guard let (pane, tabIndex) = findTabInternal(tabId) else { return false }
         return closeTab(tabId, with: tabIndex, in: pane)
     }
-    
+
     /// Close a tab by ID in a specific pane.
     /// - Parameter tabId: The tab to close
     /// - Parameter paneId: The pane in which to close the tab
     public func closeTab(_ tabId: TabID, inPane paneId: PaneID) -> Bool {
         guard let pane = internalController.rootNode.findPane(paneId),
-              let tabIndex = pane.tabs.firstIndex(where: { $0.id == tabId.id }) else {
+              let tabIndex = pane.tabs.firstIndex(where: { $0.id == tabId.id })
+        else {
             return false
         }
-        
+
         return closeTab(tabId, with: tabIndex, in: pane)
     }
-    
+
     /// Internal helper to close a tab given its index in a pane
     /// - Parameter tabId: The tab to close
     /// - Parameter tabIndex: The position of the tab within the pane
@@ -197,11 +292,10 @@ public final class BonsplitController {
             return nil
         }
 
-        let internalTab: TabItem?
-        if let tab {
-            internalTab = TabItem(id: tab.id.id, title: tab.title, icon: tab.icon, isDirty: tab.isDirty)
+        let internalTab: TabItem? = if let tab {
+            TabItem(id: tab.id.id, title: tab.title, icon: tab.icon, isDirty: tab.isDirty)
         } else {
-            internalTab = nil
+            nil
         }
 
         // Perform split
@@ -231,7 +325,7 @@ public final class BonsplitController {
     @discardableResult
     public func closePane(_ paneId: PaneID) -> Bool {
         // Don't close if it's the last pane and not allowed
-        if !configuration.allowCloseLastPane && internalController.rootNode.allPaneIds.count <= 1 {
+        if !configuration.allowCloseLastPane, internalController.rootNode.allPaneIds.count <= 1 {
             return false
         }
 
@@ -265,6 +359,7 @@ public final class BonsplitController {
     public func focusPane(_ paneId: PaneID) {
         internalController.focusPane(PaneID(id: paneId.id))
         delegate?.splitTabBar(self, didFocusPane: paneId)
+        onFocusChanged?()
     }
 
     /// Navigate focus in a direction
@@ -272,6 +367,7 @@ public final class BonsplitController {
         internalController.navigateFocus(direction: direction)
         if let focusedPaneId {
             delegate?.splitTabBar(self, didFocusPane: focusedPaneId)
+            onFocusChanged?()
         }
     }
 
@@ -306,7 +402,8 @@ public final class BonsplitController {
     /// Get selected tab in a pane
     public func selectedTab(inPane paneId: PaneID) -> Tab? {
         guard let pane = internalController.rootNode.findPane(PaneID(id: paneId.id)),
-              let selected = pane.selectedTab else {
+              let selected = pane.selectedTab
+        else {
             return nil
         }
         return Tab(from: selected)
@@ -331,7 +428,7 @@ public final class BonsplitController {
                 paneId: bounds.paneId.id.uuidString,
                 frame: pixelFrame,
                 selectedTabId: pane?.selectedTabId?.uuidString,
-                tabIds: pane?.tabs.map { $0.id.uuidString } ?? []
+                tabIds: pane?.tabs.map(\.id.uuidString) ?? []
             )
         }
 
@@ -351,7 +448,7 @@ public final class BonsplitController {
 
     private func buildExternalTree(from node: SplitNode, containerFrame: CGRect, bounds: CGRect = CGRect(x: 0, y: 0, width: 1, height: 1)) -> ExternalTreeNode {
         switch node {
-        case .pane(let paneState):
+        case let .pane(paneState):
             let pixelFrame = PixelRect(
                 x: Double(bounds.minX * containerFrame.width + containerFrame.origin.x),
                 y: Double(bounds.minY * containerFrame.height + containerFrame.origin.y),
@@ -367,7 +464,7 @@ public final class BonsplitController {
             )
             return .pane(paneNode)
 
-        case .split(let splitState):
+        case let .split(splitState):
             let dividerPos = splitState.dividerPosition
             let firstBounds: CGRect
             let secondBounds: CGRect
@@ -398,7 +495,7 @@ public final class BonsplitController {
 
     /// Check if a split exists by ID
     public func findSplit(_ splitId: UUID) -> Bool {
-        return internalController.findSplit(splitId) != nil
+        internalController.findSplit(splitId) != nil
     }
 
     // MARK: - Geometry Update API
@@ -438,7 +535,7 @@ public final class BonsplitController {
 
     /// Notify geometry change to delegate (internal use)
     /// - Parameter isDragging: Whether the change is due to active divider dragging
-    internal func notifyGeometryChange(isDragging: Bool = false) {
+    func notifyGeometryChange(isDragging: Bool = false) {
         guard !internalController.isExternalUpdateInProgress else { return }
 
         // If dragging, check if delegate wants notifications during drag

@@ -33,8 +33,8 @@ public struct BonsplitView<Content: View, EmptyContent: View>: View {
         @ViewBuilder emptyPane: @escaping (PaneID) -> EmptyContent
     ) {
         self.controller = controller
-        self.contentBuilder = content
-        self.emptyPaneBuilder = emptyPane
+        contentBuilder = content
+        emptyPaneBuilder = emptyPane
     }
 
     public var body: some View {
@@ -58,18 +58,18 @@ public struct BonsplitView<Content: View, EmptyContent: View>: View {
 
 // MARK: - Convenience initializer with default empty view
 
-extension BonsplitView where EmptyContent == DefaultEmptyPaneView {
+public extension BonsplitView where EmptyContent == DefaultEmptyPaneView {
     /// Initialize with a controller and content builder, using the default empty pane view
     /// - Parameters:
     ///   - controller: The BonsplitController managing the tab state
     ///   - content: A ViewBuilder closure that provides content for each tab. Receives the tab and pane ID.
-    public init(
+    init(
         controller: BonsplitController,
         @ViewBuilder content: @escaping (Tab, PaneID) -> Content
     ) {
         self.controller = controller
-        self.contentBuilder = content
-        self.emptyPaneBuilder = { _ in DefaultEmptyPaneView() }
+        contentBuilder = content
+        emptyPaneBuilder = { _ in DefaultEmptyPaneView() }
     }
 }
 

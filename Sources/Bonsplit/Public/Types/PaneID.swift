@@ -2,13 +2,13 @@ import Foundation
 
 /// Opaque identifier for panes
 public struct PaneID: Hashable, Codable, Sendable {
-    internal let id: UUID
+    public let id: UUID
 
     public init() {
-        self.id = UUID()
+        id = UUID()
     }
 
-    internal init(id: UUID) {
+    init(id: UUID) {
         self.id = id
     }
 }

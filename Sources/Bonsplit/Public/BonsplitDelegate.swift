@@ -1,6 +1,7 @@
 import Foundation
 
 /// Protocol for receiving callbacks about tab bar events
+@MainActor
 public protocol BonsplitDelegate: AnyObject {
     // MARK: - Tab Lifecycle (Veto Operations)
 
@@ -61,17 +62,31 @@ public protocol BonsplitDelegate: AnyObject {
 // MARK: - Default Implementations (all methods optional)
 
 public extension BonsplitDelegate {
-    func splitTabBar(_ controller: BonsplitController, shouldCreateTab tab: Tab, inPane pane: PaneID) -> Bool { true }
-    func splitTabBar(_ controller: BonsplitController, shouldCloseTab tab: Tab, inPane pane: PaneID) -> Bool { true }
-    func splitTabBar(_ controller: BonsplitController, didCreateTab tab: Tab, inPane pane: PaneID) {}
-    func splitTabBar(_ controller: BonsplitController, didCloseTab tabId: TabID, fromPane pane: PaneID) {}
-    func splitTabBar(_ controller: BonsplitController, didSelectTab tab: Tab, inPane pane: PaneID) {}
-    func splitTabBar(_ controller: BonsplitController, didMoveTab tab: Tab, fromPane source: PaneID, toPane destination: PaneID) {}
-    func splitTabBar(_ controller: BonsplitController, shouldSplitPane pane: PaneID, orientation: SplitOrientation) -> Bool { true }
-    func splitTabBar(_ controller: BonsplitController, shouldClosePane pane: PaneID) -> Bool { true }
-    func splitTabBar(_ controller: BonsplitController, didSplitPane originalPane: PaneID, newPane: PaneID, orientation: SplitOrientation) {}
-    func splitTabBar(_ controller: BonsplitController, didClosePane paneId: PaneID) {}
-    func splitTabBar(_ controller: BonsplitController, didFocusPane pane: PaneID) {}
-    func splitTabBar(_ controller: BonsplitController, didChangeGeometry snapshot: LayoutSnapshot) {}
-    func splitTabBar(_ controller: BonsplitController, shouldNotifyDuringDrag: Bool) -> Bool { false }
+    func splitTabBar(_: BonsplitController, shouldCreateTab _: Tab, inPane _: PaneID) -> Bool {
+        true
+    }
+
+    func splitTabBar(_: BonsplitController, shouldCloseTab _: Tab, inPane _: PaneID) -> Bool {
+        true
+    }
+
+    func splitTabBar(_: BonsplitController, didCreateTab _: Tab, inPane _: PaneID) {}
+    func splitTabBar(_: BonsplitController, didCloseTab _: TabID, fromPane _: PaneID) {}
+    func splitTabBar(_: BonsplitController, didSelectTab _: Tab, inPane _: PaneID) {}
+    func splitTabBar(_: BonsplitController, didMoveTab _: Tab, fromPane _: PaneID, toPane _: PaneID) {}
+    func splitTabBar(_: BonsplitController, shouldSplitPane _: PaneID, orientation _: SplitOrientation) -> Bool {
+        true
+    }
+
+    func splitTabBar(_: BonsplitController, shouldClosePane _: PaneID) -> Bool {
+        true
+    }
+
+    func splitTabBar(_: BonsplitController, didSplitPane _: PaneID, newPane _: PaneID, orientation _: SplitOrientation) {}
+    func splitTabBar(_: BonsplitController, didClosePane _: PaneID) {}
+    func splitTabBar(_: BonsplitController, didFocusPane _: PaneID) {}
+    func splitTabBar(_: BonsplitController, didChangeGeometry _: LayoutSnapshot) {}
+    func splitTabBar(_: BonsplitController, shouldNotifyDuringDrag _: Bool) -> Bool {
+        false
+    }
 }

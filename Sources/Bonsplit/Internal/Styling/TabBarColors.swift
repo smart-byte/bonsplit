@@ -1,5 +1,5 @@
-import SwiftUI
 import AppKit
+import SwiftUI
 
 /// Native macOS colors for the tab bar
 enum TabBarColors {

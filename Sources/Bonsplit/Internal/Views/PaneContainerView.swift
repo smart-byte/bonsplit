@@ -11,22 +11,31 @@ enum DropZone: Equatable {
 
     var orientation: SplitOrientation? {
         switch self {
-        case .left, .right: return .horizontal
-        case .top, .bottom: return .vertical
-        case .center: return nil
+        case .left, .right: .horizontal
+        case .top, .bottom: .vertical
+        case .center: nil
         }
     }
 
     var insertsFirst: Bool {
         switch self {
-        case .left, .top: return true
-        default: return false
+        case .left, .top: true
+        default: false
         }
     }
 }
 
+/// Drop lifecycle state to prevent stale `dropUpdated` callbacks from
+/// re-arming the indicator after `performDrop`/`dropExited`.
+enum PaneDropLifecycle {
+    case idle
+    case hovering
+}
+
 /// Container for a single pane with its tab bar and content area
 struct PaneContainerView<Content: View, EmptyContent: View>: View {
+    @Environment(BonsplitController.self) private var bonsplitController
+
     @Bindable var pane: PaneState
     let controller: SplitViewController
     let contentBuilder: (TabItem, PaneID) -> Content
@@ -35,9 +44,14 @@ struct PaneContainerView<Content: View, EmptyContent: View>: View {
     var contentViewLifecycle: ContentViewLifecycle = .recreateOnSwitch
 
     @State private var activeDropZone: DropZone?
+    @State private var dropLifecycle: PaneDropLifecycle = .idle
 
     private var isFocused: Bool {
         controller.focusedPaneId == pane.id
+    }
+
+    private var isDragging: Bool {
+        controller.draggingTab != nil
     }
 
     var body: some View {
@@ -54,11 +68,17 @@ struct PaneContainerView<Content: View, EmptyContent: View>: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color(nsColor: .textBackgroundColor))
+        .onChange(of: isDragging) { _, newValue in
+            // Safety net: clear active drop zone when dragging stops
+            if !newValue {
+                activeDropZone = nil
+                dropLifecycle = .idle
+            }
+        }
     }
 
     // MARK: - Content Area with Drop Zones
 
-    @ViewBuilder
     private var contentAreaWithDropZones: some View {
         GeometryReader { geometry in
             let size = geometry.size
@@ -67,8 +87,18 @@ struct PaneContainerView<Content: View, EmptyContent: View>: View {
                 // Main content
                 contentArea
 
-                // Drop zones layer (above content, receives drops and taps)
-                dropZonesLayer(size: size)
+                // Drop-zone overlay: ONLY mounted while a tab drag is in
+                // progress. SwiftUI's `.onDrop` registers the underlying
+                // NSView as `NSDraggingDestination` even when
+                // `allowsHitTesting(false)` is set and even when the
+                // declared UTTypes don't match the dragged item — which
+                // silently swallows file/image drops to AppKit views
+                // below (NSCollectionView, NSTableView, PinboardCanvas).
+                // Mounting conditionally is the only reliable way to
+                // keep file-drag affordances working in the host app.
+                if isDragging {
+                    dropZonesLayer(size: size)
+                }
 
                 // Visual placeholder (non-interactive)
                 dropPlaceholder(for: activeDropZone, in: size)
@@ -92,16 +122,30 @@ struct PaneContainerView<Content: View, EmptyContent: View>: View {
                 if let selectedTab = pane.selectedTab {
                     contentBuilder(selectedTab, pane.id)
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .allowsHitTesting(!isDragging)
                 }
 
             case .keepAllAlive:
-                // macOS-like behavior: keep all tab views in hierarchy
+                // macOS-like behavior: keep all tab views in hierarchy.
+                //
+                // `.opacity(0)` + `.allowsHitTesting(false)` only stop
+                // SwiftUI gestures from reaching inactive tabs — AppKit's
+                // NSDragging routes to the topmost NSView registered for
+                // the dragged types regardless of those modifiers, so a
+                // file drop targeted at the visible tab can silently land
+                // on a layered inactive NSCollectionView / NSView. The
+                // `inactiveTabHidden` modifier wraps the content in a
+                // hidden() so the underlying NSHostingView reports
+                // `isHidden = true` to AppKit and drops route to the
+                // visible tab as expected.
                 ZStack {
                     ForEach(pane.tabs) { tab in
+                        let isActive = tab.id == pane.selectedTabId
                         contentBuilder(tab, pane.id)
                             .frame(maxWidth: .infinity, maxHeight: .infinity)
-                            .opacity(tab.id == pane.selectedTabId ? 1 : 0)
-                            .allowsHitTesting(tab.id == pane.selectedTabId)
+                            .opacity(isActive ? 1 : 0)
+                            .allowsHitTesting(!isDragging && isActive)
+                            .modifier(InactiveTabHidden(isHidden: !isActive))
                     }
                 }
             }
@@ -110,18 +154,18 @@ struct PaneContainerView<Content: View, EmptyContent: View>: View {
 
     // MARK: - Drop Zones Layer
 
-    @ViewBuilder
     private func dropZonesLayer(size: CGSize) -> some View {
-        // Single unified drop zone that determines zone based on position
+        // Drop zone overlay — only intercepts events while a tab drag is in progress,
+        // so AppKit views (NSCollectionView, NSTableView) receive cursor/mouse events normally.
         Color.clear
-            .onTapGesture {
-                controller.focusPane(pane.id)
-            }
-            .onDrop(of: [.text], delegate: UnifiedPaneDropDelegate(
+            .allowsHitTesting(isDragging)
+            .onDrop(of: [.tabTransfer], delegate: UnifiedPaneDropDelegate(
                 size: size,
                 pane: pane,
                 controller: controller,
-                activeDropZone: $activeDropZone
+                bonsplitController: bonsplitController,
+                activeDropZone: $activeDropZone,
+                dropLifecycle: $dropLifecycle
             ))
     }
 
@@ -134,20 +178,18 @@ struct PaneContainerView<Content: View, EmptyContent: View>: View {
         let padding: CGFloat = 4
 
         // Calculate frame based on zone
-        let frame: CGRect = {
-            switch zone {
-            case .center, .none:
-                return CGRect(x: padding, y: padding, width: size.width - padding * 2, height: size.height - padding * 2)
-            case .left:
-                return CGRect(x: padding, y: padding, width: size.width / 2 - padding, height: size.height - padding * 2)
-            case .right:
-                return CGRect(x: size.width / 2, y: padding, width: size.width / 2 - padding, height: size.height - padding * 2)
-            case .top:
-                return CGRect(x: padding, y: padding, width: size.width - padding * 2, height: size.height / 2 - padding)
-            case .bottom:
-                return CGRect(x: padding, y: size.height / 2, width: size.width - padding * 2, height: size.height / 2 - padding)
-            }
-        }()
+        let frame = switch zone {
+        case .center, .none:
+            CGRect(x: padding, y: padding, width: size.width - padding * 2, height: size.height - padding * 2)
+        case .left:
+            CGRect(x: padding, y: padding, width: size.width / 2 - padding, height: size.height - padding * 2)
+        case .right:
+            CGRect(x: size.width / 2, y: padding, width: size.width / 2 - padding, height: size.height - padding * 2)
+        case .top:
+            CGRect(x: padding, y: padding, width: size.width - padding * 2, height: size.height / 2 - padding)
+        case .bottom:
+            CGRect(x: padding, y: size.height / 2, width: size.width - padding * 2, height: size.height / 2 - padding)
+        }
 
         RoundedRectangle(cornerRadius: 8)
             .fill(placeholderColor)
@@ -157,16 +199,33 @@ struct PaneContainerView<Content: View, EmptyContent: View>: View {
             )
             .frame(width: frame.width, height: frame.height)
             .position(x: frame.midX, y: frame.midY)
-            .opacity(zone != nil ? 1 : 0)
+            .opacity((zone != nil && isDragging) ? 1 : 0)
             .animation(.spring(duration: 0.25, bounce: 0.15), value: zone)
+            .animation(.spring(duration: 0.25, bounce: 0.15), value: isDragging)
     }
 
     // MARK: - Empty Pane View
 
-    @ViewBuilder
     private var emptyPaneView: some View {
         emptyPaneBuilder(pane.id)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+}
+
+/// Conditionally wraps the content in `.hidden()`. SwiftUI's
+/// `.hidden()` propagates to the underlying `NSHostingView`'s
+/// `isHidden = true`, which is the only signal that takes inactive
+/// tabs out of AppKit's NSDragging routing. `.opacity(0)` alone leaves
+/// the NSView visible to drag-and-drop and silently misroutes drops.
+private struct InactiveTabHidden: ViewModifier {
+    let isHidden: Bool
+
+    func body(content: Content) -> some View {
+        if isHidden {
+            content.hidden()
+        } else {
+            content
+        }
     }
 }
 
@@ -176,9 +235,11 @@ struct UnifiedPaneDropDelegate: DropDelegate {
     let size: CGSize
     let pane: PaneState
     let controller: SplitViewController
+    let bonsplitController: BonsplitController
     @Binding var activeDropZone: DropZone?
+    @Binding var dropLifecycle: PaneDropLifecycle
 
-    // Calculate zone based on position within the view
+    /// Calculate zone based on position within the view
     private func zoneForLocation(_ location: CGPoint) -> DropZone {
         let edgeRatio: CGFloat = 0.25
         let horizontalEdge = max(80, size.width * edgeRatio)
@@ -199,97 +260,104 @@ struct UnifiedPaneDropDelegate: DropDelegate {
     }
 
     func performDrop(info: DropInfo) -> Bool {
-        let zone = zoneForLocation(info.location)
-
-        guard let provider = info.itemProviders(for: [.text]).first else {
-            activeDropZone = nil
-            // Clear drag state
-            controller.draggingTab = nil
-            controller.dragSourcePaneId = nil
-            return false
-        }
-
-        provider.loadItem(forTypeIdentifier: UTType.text.identifier, options: nil) { item, _ in
-            DispatchQueue.main.async {
-                activeDropZone = nil
-                // Clear drag state
-                controller.draggingTab = nil
-                controller.dragSourcePaneId = nil
-
-                // Handle both Data and String representations
-                let string: String?
-                if let data = item as? Data {
-                    string = String(data: data, encoding: .utf8)
-                } else if let nsString = item as? NSString {
-                    string = nsString as String
-                } else if let str = item as? String {
-                    string = str
-                } else {
-                    string = nil
-                }
-
-                guard let string, let transfer = decodeTransfer(from: string) else {
-                    return
-                }
-
-                // Find source pane
-                guard let sourcePaneId = controller.rootNode.allPaneIds.first(where: { $0.id == transfer.sourcePaneId }) else {
-                    return
-                }
-
-                if zone == .center {
-                    // Drop in center - move tab to this pane
-                    withAnimation(.spring(duration: 0.3, bounce: 0.15)) {
-                        controller.moveTab(transfer.tab, from: sourcePaneId, to: pane.id, atIndex: nil)
-                    }
-                } else if let orientation = zone.orientation {
-                    // Drop on edge - create a split (120fps animation handled by SplitAnimator)
-                    // Remove tab from source first
-                    if let sourcePane = controller.rootNode.findPane(sourcePaneId) {
-                        sourcePane.removeTab(transfer.tab.id)
-
-                        // Close empty source pane if not the only one
-                        if sourcePane.tabs.isEmpty && controller.rootNode.allPaneIds.count > 1 {
-                            controller.closePane(sourcePaneId)
-                        }
-                    }
-
-                    // Create the split
-                    controller.splitPaneWithTab(
-                        pane.id,
-                        orientation: orientation,
-                        tab: transfer.tab,
-                        insertFirst: zone.insertsFirst
-                    )
-                }
+        if !Thread.isMainThread {
+            return DispatchQueue.main.sync {
+                performDrop(info: info)
             }
         }
 
+        let zone = zoneForLocation(info.location)
+
+        // Same-window fast path: drag and drop share this controller's
+        // in-memory `draggingTab`, no pasteboard round-trip needed.
+        if let draggedTab = controller.draggingTab,
+           let sourcePaneId = controller.dragSourcePaneId
+        {
+            dropLifecycle = .idle
+            activeDropZone = nil
+            controller.draggingTab = nil
+            controller.dragSourcePaneId = nil
+
+            if zone == .center {
+                if sourcePaneId != pane.id {
+                    withTransaction(Transaction(animation: nil)) {
+                        controller.moveTab(draggedTab, from: sourcePaneId, to: pane.id, atIndex: nil)
+                    }
+                }
+            } else if let orientation = zone.orientation {
+                // Remove the tab from its source pane first; splitPaneWithTab
+                // re-inserts it into the freshly created pane.
+                if let sourcePane = controller.rootNode.findPane(sourcePaneId) {
+                    sourcePane.removeTab(draggedTab.id)
+                    if sourcePane.tabs.isEmpty, controller.rootNode.allPaneIds.count > 1 {
+                        controller.closePane(sourcePaneId)
+                    }
+                }
+                controller.splitPaneWithTab(
+                    pane.id,
+                    orientation: orientation,
+                    tab: draggedTab,
+                    insertFirst: zone.insertsFirst
+                )
+            }
+            return true
+        }
+
+        // Foreign drop: drag started in another controller (= other
+        // window). Read the payload from the pasteboard and let the
+        // host app sort out the cross-controller move.
+        return acceptForeignDrop(info: info, zone: zone)
+    }
+
+    private func acceptForeignDrop(info: DropInfo, zone: DropZone) -> Bool {
+        guard let provider = info.itemProviders(for: [.tabTransfer]).first else {
+            return false
+        }
+        let destinationPaneId = pane.id
+        let controllerRef = controller
+        provider.loadDataRepresentation(forTypeIdentifier: UTType.tabTransfer.identifier) { data, _ in
+            guard let data,
+                  let transfer = try? JSONDecoder().decode(TabTransferData.self, from: data)
+            else { return }
+            // For now, foreign drops always land in the destination pane
+            // itself (zone == .center or any). Edge-zone splits via foreign
+            // drop are intentionally deferred — they need host coordination
+            // to know whether the source window survives.
+            _ = zone
+            Task { @MainActor in
+                controllerRef.onForeignTabDrop?(transfer.tab, transfer.sourcePaneId, destinationPaneId, nil)
+            }
+        }
+        Task { @MainActor in
+            dropLifecycle = .idle
+            activeDropZone = nil
+        }
         return true
     }
 
     func dropEntered(info: DropInfo) {
+        dropLifecycle = .hovering
         activeDropZone = zoneForLocation(info.location)
     }
 
-    func dropExited(info: DropInfo) {
+    func dropExited(info _: DropInfo) {
+        dropLifecycle = .idle
         activeDropZone = nil
     }
 
     func dropUpdated(info: DropInfo) -> DropProposal? {
+        guard dropLifecycle == .hovering else {
+            return DropProposal(operation: .move)
+        }
+
         activeDropZone = zoneForLocation(info.location)
         return DropProposal(operation: .move)
     }
 
     func validateDrop(info: DropInfo) -> Bool {
-        info.hasItemsConforming(to: [.text])
-    }
-
-    private func decodeTransfer(from string: String) -> TabTransferData? {
-        guard let data = string.data(using: .utf8),
-              let transfer = try? JSONDecoder().decode(TabTransferData.self, from: data) else {
-            return nil
-        }
-        return transfer
+        // Accept any drop whose pasteboard carries our exported UTI —
+        // both same-window (controller.draggingTab set) and foreign
+        // drops (from another window in this process) qualify.
+        info.hasItemsConforming(to: [.tabTransfer])
     }
 }

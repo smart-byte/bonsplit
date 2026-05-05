@@ -17,10 +17,10 @@ public struct PixelRect: Codable, Sendable, Equatable {
     }
 
     public init(from cgRect: CGRect) {
-        self.x = Double(cgRect.origin.x)
-        self.y = Double(cgRect.origin.y)
-        self.width = Double(cgRect.size.width)
-        self.height = Double(cgRect.size.height)
+        x = Double(cgRect.origin.x)
+        y = Double(cgRect.origin.y)
+        width = Double(cgRect.size.width)
+        height = Double(cgRect.size.height)
     }
 }
 
@@ -89,8 +89,8 @@ public struct ExternalPaneNode: Codable, Sendable, Equatable {
 /// External representation of a split node
 public struct ExternalSplitNode: Codable, Sendable, Equatable {
     public let id: String
-    public let orientation: String  // "horizontal" or "vertical"
-    public let dividerPosition: Double  // 0.0-1.0
+    public let orientation: String // "horizontal" or "vertical"
+    public let dividerPosition: Double // 0.0-1.0
     public let first: ExternalTreeNode
     public let second: ExternalTreeNode
 
@@ -108,7 +108,7 @@ public indirect enum ExternalTreeNode: Codable, Sendable, Equatable {
     case pane(ExternalPaneNode)
     case split(ExternalSplitNode)
 
-    // Custom coding keys for enum representation
+    /// Custom coding keys for enum representation
     private enum CodingKeys: String, CodingKey {
         case type
         case pane
@@ -135,10 +135,10 @@ public indirect enum ExternalTreeNode: Codable, Sendable, Equatable {
         var container = encoder.container(keyedBy: CodingKeys.self)
 
         switch self {
-        case .pane(let paneNode):
+        case let .pane(paneNode):
             try container.encode("pane", forKey: .type)
             try container.encode(paneNode, forKey: .pane)
-        case .split(let splitNode):
+        case let .split(splitNode):
             try container.encode("split", forKey: .type)
             try container.encode(splitNode, forKey: .split)
         }

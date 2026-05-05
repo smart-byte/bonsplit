@@ -68,9 +68,13 @@ final class PaneState: Identifiable {
 
     /// Move a tab within this pane
     func moveTab(from sourceIndex: Int, to destinationIndex: Int) {
-        guard sourceIndex != destinationIndex,
-              tabs.indices.contains(sourceIndex),
+        guard tabs.indices.contains(sourceIndex),
               destinationIndex >= 0, destinationIndex <= tabs.count else { return }
+
+        // Treat dropping "on itself" or immediately after itself as a no-op.
+        if destinationIndex == sourceIndex || destinationIndex == sourceIndex + 1 {
+            return
+        }
 
         let tab = tabs.remove(at: sourceIndex)
         let adjustedIndex = destinationIndex > sourceIndex ? destinationIndex - 1 : destinationIndex

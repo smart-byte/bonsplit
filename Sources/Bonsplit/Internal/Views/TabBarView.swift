@@ -5,12 +5,13 @@ import UniformTypeIdentifiers
 struct TabBarView: View {
     @Environment(BonsplitController.self) private var controller
     @Environment(SplitViewController.self) private var splitViewController
-    
+
     @Bindable var pane: PaneState
     let isFocused: Bool
     var showSplitButtons: Bool = true
 
     @State private var dropTargetIndex: Int?
+    @State private var dropLifecycle: TabDropLifecycle = .idle
     @State private var scrollOffset: CGFloat = 0
     @State private var contentWidth: CGFloat = 0
     @State private var containerWidth: CGFloat = 0
@@ -28,6 +29,10 @@ struct TabBarView: View {
         isFocused || splitViewController.dragSourcePaneId == pane.id
     }
 
+    private var isDragging: Bool {
+        splitViewController.draggingTab != nil
+    }
+
     var body: some View {
         HStack(spacing: 0) {
             // Scrollable tabs with fade overlays
@@ -40,10 +45,14 @@ struct TabBarView: View {
                                     .id(tab.id)
                             }
 
-                            // Drop zone at end of tabs
+                            // Always keep a small "drop after last tab" target.
                             dropZoneAtEnd
                         }
                         .padding(.horizontal, TabBarMetrics.barPadding)
+                        .transaction { tx in
+                            tx.animation = nil
+                            tx.disablesAnimations = true
+                        }
                         .background(
                             GeometryReader { contentGeo in
                                 Color.clear
@@ -59,6 +68,21 @@ struct TabBarView: View {
                             }
                         )
                     }
+                    .overlay(alignment: .trailing) {
+                        let trailingWidth = max(0, containerGeo.size.width - contentWidth)
+                        if trailingWidth >= 1 {
+                            Color.clear
+                                .frame(width: trailingWidth, height: TabBarMetrics.tabHeight)
+                                .contentShape(Rectangle())
+                                .onDrop(of: [.tabTransfer], delegate: TabDropDelegate(
+                                    targetIndex: pane.tabs.count,
+                                    pane: pane,
+                                    controller: splitViewController,
+                                    dropTargetIndex: $dropTargetIndex,
+                                    dropLifecycle: $dropLifecycle
+                                ))
+                        }
+                    }
                     .coordinateSpace(name: "tabScroll")
                     .onAppear {
                         containerWidth = containerGeo.size.width
@@ -67,11 +91,15 @@ struct TabBarView: View {
                         }
                     }
                     .onChange(of: containerGeo.size.width) { _, newWidth in
-                        containerWidth = newWidth
+                        // 0.5 pt hysteresis — sub-pixel jitter from
+                        // window-edge resize would re-fire body per frame.
+                        if abs(newWidth - containerWidth) > 0.5 {
+                            containerWidth = newWidth
+                        }
                     }
                     .onChange(of: pane.selectedTabId) { _, newTabId in
                         if let tabId = newTabId {
-                            withAnimation(.easeInOut(duration: 0.2)) {
+                            withTransaction(Transaction(animation: nil)) {
                                 proxy.scrollTo(tabId, anchor: .center)
                             }
                         }
@@ -80,8 +108,6 @@ struct TabBarView: View {
                 .frame(height: TabBarMetrics.barHeight)
                 .overlay(fadeOverlays)
             }
-
-            Spacer()
 
             // Split buttons
             if showSplitButtons {
@@ -92,37 +118,46 @@ struct TabBarView: View {
         .contentShape(Rectangle())
         .background(tabBarBackground)
         .saturation(shouldShowFullSaturation ? 1.0 : 0)
+        .onChange(of: isDragging) { _, newValue in
+            if !newValue {
+                dropTargetIndex = nil
+                dropLifecycle = .idle
+            }
+        }
     }
 
     // MARK: - Tab Item
 
-    @ViewBuilder
     private func tabItem(for tab: TabItem, at index: Int) -> some View {
-        TabItemView(
+        TabDragSource(
             tab: tab,
-            isSelected: pane.selectedTabId == tab.id,
-            onSelect: {
-                withAnimation(.easeInOut(duration: TabBarMetrics.selectionDuration)) {
-                    pane.selectTab(tab.id)
-                    controller.focusPane(pane.id)
-                }
-            },
-            onClose: {
-                withAnimation(.easeInOut(duration: TabBarMetrics.closeDuration)) {
-                    _ = controller.closeTab(TabID(id: tab.id), inPane: pane.id)
-                }
-            }
-        )
-        .onDrag {
-            createItemProvider(for: tab)
-        } preview: {
-            TabDragPreview(tab: tab)
+            sourcePaneId: pane.id,
+            controller: splitViewController,
+            preview: { AnyView(TabDragPreview(tab: tab)) }
+        ) {
+            TabItemView(
+                tab: tab,
+                isSelected: pane.selectedTabId == tab.id,
+                onSelect: {
+                    withTransaction(Transaction(animation: nil)) {
+                        pane.selectTab(tab.id)
+                        controller.focusPane(pane.id)
+                    }
+                },
+                onClose: {
+                    withTransaction(Transaction(animation: nil)) {
+                        _ = controller.closeTab(TabID(id: tab.id), inPane: pane.id)
+                    }
+                },
+                contextMenuContent: contextMenuBuilder(for: tab)
+            )
         }
-        .onDrop(of: [.text], delegate: TabDropDelegate(
+        .onDrop(of: [.tabTransfer], delegate: TabDropDelegate(
             targetIndex: index,
             pane: pane,
             controller: splitViewController,
-            dropTargetIndex: $dropTargetIndex
+            dropTargetIndex: $dropTargetIndex,
+            dropLifecycle: $dropLifecycle
         ))
         .overlay(alignment: .leading) {
             if dropTargetIndex == index {
@@ -131,34 +166,28 @@ struct TabBarView: View {
         }
     }
 
-    // MARK: - Item Provider
-
-    private func createItemProvider(for tab: TabItem) -> NSItemProvider {
-        // Set drag source for visual feedback
-        splitViewController.draggingTab = tab
-        splitViewController.dragSourcePaneId = pane.id
-
-        let transfer = TabTransferData(tab: tab, sourcePaneId: pane.id.id)
-        if let data = try? JSONEncoder().encode(transfer),
-           let string = String(data: data, encoding: .utf8) {
-            return NSItemProvider(object: string as NSString)
-        }
-        return NSItemProvider()
+    /// Returning `nil` when no host hook is installed yields no
+    /// `contextMenu` content, preserving the default (no menu) behaviour.
+    private func contextMenuBuilder(for tab: TabItem) -> (() -> AnyView)? {
+        guard let provider = controller.onTabContextMenu else { return nil }
+        let publicTab = Tab(from: tab)
+        let paneId = pane.id
+        return { provider(publicTab, paneId) }
     }
 
     // MARK: - Drop Zone at End
 
-    @ViewBuilder
     private var dropZoneAtEnd: some View {
         Rectangle()
             .fill(Color.clear)
             .frame(width: 30, height: TabBarMetrics.tabHeight)
             .contentShape(Rectangle())
-            .onDrop(of: [.text], delegate: TabDropDelegate(
+            .onDrop(of: [.tabTransfer], delegate: TabDropDelegate(
                 targetIndex: pane.tabs.count,
                 pane: pane,
                 controller: splitViewController,
-                dropTargetIndex: $dropTargetIndex
+                dropTargetIndex: $dropTargetIndex,
+                dropLifecycle: $dropLifecycle
             ))
             .overlay(alignment: .leading) {
                 if dropTargetIndex == pane.tabs.count {
@@ -169,18 +198,15 @@ struct TabBarView: View {
 
     // MARK: - Drop Indicator
 
-    @ViewBuilder
     private var dropIndicator: some View {
         Capsule()
             .fill(TabBarColors.dropIndicator)
             .frame(width: TabBarMetrics.dropIndicatorWidth, height: TabBarMetrics.dropIndicatorHeight)
             .offset(x: -1)
-            .transition(.scale.combined(with: .opacity))
     }
 
     // MARK: - Split Buttons
 
-    @ViewBuilder
     private var splitButtons: some View {
         HStack(spacing: 4) {
             Button {
@@ -221,7 +247,6 @@ struct TabBarView: View {
             )
             .frame(width: fadeWidth)
             .opacity(canScrollLeft ? 1 : 0)
-            .animation(.easeInOut(duration: 0.15), value: canScrollLeft)
             .allowsHitTesting(false)
 
             Spacer()
@@ -234,14 +259,12 @@ struct TabBarView: View {
             )
             .frame(width: fadeWidth)
             .opacity(canScrollRight ? 1 : 0)
-            .animation(.easeInOut(duration: 0.15), value: canScrollRight)
             .allowsHitTesting(false)
         }
     }
 
     // MARK: - Background
 
-    @ViewBuilder
     private var tabBarBackground: some View {
         Rectangle()
             .fill(isFocused ? TabBarColors.barBackground : TabBarColors.barBackground.opacity(0.95))
@@ -253,6 +276,11 @@ struct TabBarView: View {
     }
 }
 
+enum TabDropLifecycle {
+    case idle
+    case hovering
+}
+
 // MARK: - Tab Drop Delegate
 
 struct TabDropDelegate: DropDelegate {
@@ -260,85 +288,111 @@ struct TabDropDelegate: DropDelegate {
     let pane: PaneState
     let controller: SplitViewController
     @Binding var dropTargetIndex: Int?
+    @Binding var dropLifecycle: TabDropLifecycle
 
     func performDrop(info: DropInfo) -> Bool {
-        dropTargetIndex = nil
-
-        guard let provider = info.itemProviders(for: [.text]).first else {
-            // Clear drag state
-            controller.draggingTab = nil
-            controller.dragSourcePaneId = nil
-            return false
-        }
-
-        provider.loadItem(forTypeIdentifier: UTType.text.identifier, options: nil) { item, _ in
-            DispatchQueue.main.async {
-                // Clear drag state
-                controller.draggingTab = nil
-                controller.dragSourcePaneId = nil
-
-                // Handle both Data and String representations
-                let string: String?
-                if let data = item as? Data {
-                    string = String(data: data, encoding: .utf8)
-                } else if let nsString = item as? NSString {
-                    string = nsString as String
-                } else if let str = item as? String {
-                    string = str
-                } else {
-                    string = nil
-                }
-
-                guard let string, let transfer = decodeTransfer(from: string) else {
-                    return
-                }
-
-                // Same pane - reorder
-                if transfer.sourcePaneId == pane.id.id {
-                    guard let sourceIndex = pane.tabs.firstIndex(where: { $0.id == transfer.tab.id }) else {
-                        return
-                    }
-                    withAnimation(.spring(duration: TabBarMetrics.reorderDuration, bounce: TabBarMetrics.reorderBounce)) {
-                        pane.moveTab(from: sourceIndex, to: targetIndex)
-                    }
-                } else {
-                    // Different pane - transfer
-                    guard let sourcePaneId = controller.rootNode.allPaneIds.first(where: { $0.id == transfer.sourcePaneId }) else {
-                        return
-                    }
-                    withAnimation(.spring(duration: TabBarMetrics.reorderDuration, bounce: TabBarMetrics.reorderBounce)) {
-                        controller.moveTab(transfer.tab, from: sourcePaneId, to: pane.id, atIndex: targetIndex)
-                    }
-                }
+        if !Thread.isMainThread {
+            return DispatchQueue.main.sync {
+                performDrop(info: info)
             }
         }
 
+        // Same-window fast path
+        if let draggedTab = controller.draggingTab,
+           let sourcePaneId = controller.dragSourcePaneId
+        {
+            withTransaction(Transaction(animation: nil)) {
+                if sourcePaneId == pane.id {
+                    guard let sourceIndex = pane.tabs.firstIndex(where: { $0.id == draggedTab.id }) else {
+                        return
+                    }
+                    pane.moveTab(from: sourceIndex, to: targetIndex)
+                } else {
+                    controller.moveTab(draggedTab, from: sourcePaneId, to: pane.id, atIndex: targetIndex)
+                }
+            }
+
+            dropLifecycle = .idle
+            dropTargetIndex = nil
+            controller.draggingTab = nil
+            controller.dragSourcePaneId = nil
+            return true
+        }
+
+        // Foreign drop: source lives in a different controller. Read the
+        // payload from the pasteboard and surface to the host.
+        return acceptForeignDrop(info: info)
+    }
+
+    private func acceptForeignDrop(info: DropInfo) -> Bool {
+        guard let provider = info.itemProviders(for: [.tabTransfer]).first else {
+            return false
+        }
+        let destinationPaneId = pane.id
+        let destinationIndex = targetIndex
+        let controllerRef = controller
+        provider.loadDataRepresentation(forTypeIdentifier: UTType.tabTransfer.identifier) { data, _ in
+            guard let data,
+                  let transfer = try? JSONDecoder().decode(TabTransferData.self, from: data)
+            else { return }
+            Task { @MainActor in
+                controllerRef.onForeignTabDrop?(
+                    transfer.tab,
+                    transfer.sourcePaneId,
+                    destinationPaneId,
+                    destinationIndex
+                )
+            }
+        }
+        Task { @MainActor in
+            dropLifecycle = .idle
+            dropTargetIndex = nil
+        }
         return true
     }
 
-    func dropEntered(info: DropInfo) {
-        dropTargetIndex = targetIndex
+    func dropEntered(info _: DropInfo) {
+        dropLifecycle = .hovering
+        if shouldSuppressIndicatorForNoopSamePaneDrop() {
+            dropTargetIndex = nil
+        } else {
+            dropTargetIndex = targetIndex
+        }
     }
 
-    func dropExited(info: DropInfo) {
+    func dropExited(info _: DropInfo) {
+        dropLifecycle = .idle
         if dropTargetIndex == targetIndex {
             dropTargetIndex = nil
         }
     }
 
-    func dropUpdated(info: DropInfo) -> DropProposal? {
-        DropProposal(operation: .move)
+    func dropUpdated(info _: DropInfo) -> DropProposal? {
+        guard dropLifecycle == .hovering else {
+            return DropProposal(operation: .move)
+        }
+        if shouldSuppressIndicatorForNoopSamePaneDrop() {
+            dropTargetIndex = nil
+        } else if dropTargetIndex != targetIndex {
+            dropTargetIndex = targetIndex
+        }
+        return DropProposal(operation: .move)
     }
 
     func validateDrop(info: DropInfo) -> Bool {
-        info.hasItemsConforming(to: [.text])
+        // Accept any drop carrying our exported UTI — both same-window
+        // and foreign (cross-window) drops qualify here.
+        info.hasItemsConforming(to: [.tabTransfer])
     }
 
-    private func decodeTransfer(from string: String) -> TabTransferData? {
-        guard let data = string.data(using: .utf8),
-              let transfer = try? JSONDecoder().decode(TabTransferData.self, from: data) else {
-            return nil
+    private func shouldSuppressIndicatorForNoopSamePaneDrop() -> Bool {
+        guard let draggedTab = controller.draggingTab,
+              controller.dragSourcePaneId == pane.id,
+              let sourceIndex = pane.tabs.firstIndex(where: { $0.id == draggedTab.id })
+        else {
+            return false
         }
-        return transfer
+
+        return targetIndex == sourceIndex || targetIndex == sourceIndex + 1
     }
 }

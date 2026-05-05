@@ -2,14 +2,20 @@ import Foundation
 import SwiftUI
 import UniformTypeIdentifiers
 
-/// Custom UTTypes for tab drag and drop
+/// Custom UTType for tab drag and drop payloads.
+///
+/// Conforms to `public.data` so the Codable-encoded `TabTransferData`
+/// can ride on any data-typed pasteboard item. The identifier must be
+/// declared as a `UTExportedTypeDeclarations` entry in the embedding
+/// app's `Info.plist`, otherwise AppKit silently drops the type.
+///
+/// Default identifier is reverse-DNS under Smart-Byte's `bonsplit`
+/// namespace. If you embed Bonsplit in your own app and prefer a
+/// different identifier, change the string below and update your
+/// `Info.plist` accordingly.
 extension UTType {
-    static var tabItem: UTType {
-        UTType(exportedAs: "com.splittabbar.tabitem")
-    }
-
     static var tabTransfer: UTType {
-        UTType(exportedAs: "com.splittabbar.tabtransfer")
+        UTType(exportedAs: "com.smartbyte.bonsplit.tabtransfer", conformingTo: .data)
     }
 }
 
@@ -45,7 +51,7 @@ struct TabItem: Identifiable, Hashable, Codable {
 
 extension TabItem: Transferable {
     static var transferRepresentation: some TransferRepresentation {
-        CodableRepresentation(contentType: .tabItem)
+        CodableRepresentation(contentType: .tabTransfer)
     }
 }
 

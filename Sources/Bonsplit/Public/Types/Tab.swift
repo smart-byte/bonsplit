@@ -14,10 +14,10 @@ public struct Tab: Identifiable, Hashable, Sendable {
         self.isDirty = isDirty
     }
 
-    internal init(from tabItem: TabItem) {
-        self.id = TabID(id: tabItem.id)
-        self.title = tabItem.title
-        self.icon = tabItem.icon
-        self.isDirty = tabItem.isDirty
+    init(from tabItem: TabItem) {
+        id = TabID(id: tabItem.id)
+        title = tabItem.title
+        icon = tabItem.icon
+        isDirty = tabItem.isDirty
     }
 }

@@ -3,8 +3,8 @@ import SwiftUI
 
 /// Direction from which a new split animates in
 enum SplitAnimationOrigin {
-    case fromFirst   // New pane slides in from start (left/top)
-    case fromSecond  // New pane slides in from end (right/bottom)
+    case fromFirst // New pane slides in from start (left/top)
+    case fromSecond // New pane slides in from end (right/bottom)
 }
 
 /// State for a split node (branch in the split tree)
@@ -14,7 +14,7 @@ final class SplitState: Identifiable {
     var orientation: SplitOrientation
     var first: SplitNode
     var second: SplitNode
-    var dividerPosition: CGFloat  // 0.0 to 1.0
+    var dividerPosition: CGFloat // 0.0 to 1.0
 
     /// Animation origin for entry animation (nil = no animation needed)
     var animationOrigin: SplitAnimationOrigin?

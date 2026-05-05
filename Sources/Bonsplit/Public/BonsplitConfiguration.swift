@@ -26,7 +26,6 @@ public enum NewTabPosition: Sendable {
 
 /// Configuration for the split tab bar appearance and behavior
 public struct BonsplitConfiguration: Sendable {
-
     // MARK: - Behavior
 
     /// Whether to allow creating splits
@@ -101,8 +100,8 @@ public struct BonsplitConfiguration: Sendable {
 
 // MARK: - Appearance Configuration
 
-extension BonsplitConfiguration {
-    public struct Appearance: Sendable {
+public extension BonsplitConfiguration {
+    struct Appearance: Sendable {
         // MARK: - Tab Bar
 
         /// Height of the tab bar

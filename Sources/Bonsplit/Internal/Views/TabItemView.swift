@@ -6,6 +6,9 @@ struct TabItemView: View {
     let isSelected: Bool
     let onSelect: () -> Void
     let onClose: () -> Void
+    /// Optional context-menu provider. Routed in by the parent so this
+    /// view stays decoupled from `BonsplitController`.
+    var contextMenuContent: (() -> AnyView)?
 
     @State private var isHovered = false
     @State private var isCloseHovered = false
@@ -49,6 +52,11 @@ struct TabItemView: View {
                 isHovered = hovering
             }
         }
+        .contextMenu {
+            if let contextMenuContent {
+                contextMenuContent()
+            }
+        }
         .accessibilityElement(children: .combine)
         .accessibilityLabel(tab.title)
         .accessibilityValue(tab.isDirty ? "Modified" : "")
@@ -57,7 +65,6 @@ struct TabItemView: View {
 
     // MARK: - Tab Background
 
-    @ViewBuilder
     private var tabBackground: some View {
         ZStack(alignment: .top) {
             // Background fill
@@ -90,7 +97,6 @@ struct TabItemView: View {
 
     // MARK: - Close Button / Dirty Indicator
 
-    @ViewBuilder
     private var closeOrDirtyIndicator: some View {
         ZStack {
             // Dirty indicator (shown when dirty and not hovering)

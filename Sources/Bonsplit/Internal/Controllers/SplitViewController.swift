@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 import SwiftUI
 
@@ -29,15 +30,33 @@ final class SplitViewController {
     /// Callback for geometry changes
     var onGeometryChange: (() -> Void)?
 
+    /// Fired when a tab-drop arrives whose source pane is NOT in this
+    /// controller's split tree (i.e. the user dragged a tab out of one
+    /// window and dropped it into another). Bonsplit can't resolve the
+    /// source — the host app keeps the registry of live controllers.
+    /// Parameters: payload, source pane UUID, destination pane, optional
+    /// insertion index (nil = append).
+    var onForeignTabDrop: ((TabItem, UUID, PaneID, Int?) -> Void)?
+
+    /// Fired when a tab drag started in this controller ends without
+    /// any drop receiver accepting it (NSDraggingSession returned
+    /// `operation == .none`). The host can use this to implement
+    /// "tear off into a new window" — when the mouse is released
+    /// outside every host window, treat the unaccepted drag as a
+    /// tear-off intent. Always fires before `draggingTab` is cleared.
+    /// Parameters: the tab that was being dragged, its source pane id,
+    /// and the screen point at which the mouse was released (Cocoa
+    /// coordinates, useful for placing a freshly-spawned window).
+    var onUnacceptedDragEnd: ((TabItem, PaneID, NSPoint) -> Void)?
+
     init(rootNode: SplitNode? = nil) {
         if let rootNode {
             self.rootNode = rootNode
         } else {
-            // Initialize with a single pane containing a welcome tab
-            let welcomeTab = TabItem(title: "Welcome", icon: "star")
-            let initialPane = PaneState(tabs: [welcomeTab])
+            // Initialize with a single empty pane
+            let initialPane = PaneState(tabs: [])
             self.rootNode = .pane(initialPane)
-            self.focusedPaneId = initialPane.id
+            focusedPaneId = initialPane.id
         }
     }
 
@@ -74,14 +93,13 @@ final class SplitViewController {
         newTab: TabItem?
     ) -> SplitNode {
         switch node {
-        case .pane(let paneState):
+        case let .pane(paneState):
             if paneState.id == targetPaneId {
                 // Create new pane - empty if no tab provided (gives developer full control)
-                let newPane: PaneState
-                if let tab = newTab {
-                    newPane = PaneState(tabs: [tab])
+                let newPane = if let tab = newTab {
+                    PaneState(tabs: [tab])
                 } else {
-                    newPane = PaneState(tabs: [])
+                    PaneState(tabs: [])
                 }
 
                 // Start with divider at the edge so there's no flash before animation
@@ -89,8 +107,8 @@ final class SplitViewController {
                     orientation: orientation,
                     first: .pane(paneState),
                     second: .pane(newPane),
-                    dividerPosition: 1.0,  // Start at edge (will animate to 0.5)
-                    animationOrigin: .fromSecond  // New pane slides in from right/bottom
+                    dividerPosition: 1.0, // Start at edge (will animate to 0.5)
+                    animationOrigin: .fromSecond // New pane slides in from right/bottom
                 )
 
                 // Focus the new pane
@@ -100,7 +118,7 @@ final class SplitViewController {
             }
             return node
 
-        case .split(let splitState):
+        case let .split(splitState):
             splitState.first = splitNodeRecursively(
                 node: splitState.first,
                 targetPaneId: targetPaneId,
@@ -136,16 +154,15 @@ final class SplitViewController {
         insertFirst: Bool
     ) -> SplitNode {
         switch node {
-        case .pane(let paneState):
+        case let .pane(paneState):
             if paneState.id == targetPaneId {
                 // Create new pane with the tab
                 let newPane = PaneState(tabs: [tab])
 
                 // Start with divider at the edge so there's no flash before animation
-                let splitState: SplitState
-                if insertFirst {
+                let splitState = if insertFirst {
                     // New pane goes first (left or top) - starts at 0, animates to 0.5
-                    splitState = SplitState(
+                    SplitState(
                         orientation: orientation,
                         first: .pane(newPane),
                         second: .pane(paneState),
@@ -154,7 +171,7 @@ final class SplitViewController {
                     )
                 } else {
                     // New pane goes second (right or bottom) - starts at 1, animates to 0.5
-                    splitState = SplitState(
+                    SplitState(
                         orientation: orientation,
                         first: .pane(paneState),
                         second: .pane(newPane),
@@ -170,7 +187,7 @@ final class SplitViewController {
             }
             return node
 
-        case .split(let splitState):
+        case let .split(splitState):
             splitState.first = splitNodeWithTabRecursively(
                 node: splitState.first,
                 targetPaneId: targetPaneId,
@@ -213,20 +230,20 @@ final class SplitViewController {
         targetPaneId: PaneID
     ) -> (SplitNode?, PaneID?) {
         switch node {
-        case .pane(let paneState):
+        case let .pane(paneState):
             if paneState.id == targetPaneId {
                 return (nil, nil)
             }
             return (node, nil)
 
-        case .split(let splitState):
+        case let .split(splitState):
             // Check if either direct child is the target
-            if case .pane(let firstPane) = splitState.first, firstPane.id == targetPaneId {
+            if case let .pane(firstPane) = splitState.first, firstPane.id == targetPaneId {
                 let focusTarget = splitState.second.allPaneIds.first
                 return (splitState.second, focusTarget)
             }
 
-            if case .pane(let secondPane) = splitState.second, secondPane.id == targetPaneId {
+            if case let .pane(secondPane) = splitState.second, secondPane.id == targetPaneId {
                 let focusTarget = splitState.first.allPaneIds.first
                 return (splitState.first, focusTarget)
             }
@@ -283,7 +300,7 @@ final class SplitViewController {
         focusPane(targetPaneId)
 
         // If source pane is now empty and not the only pane, close it
-        if sourcePane.tabs.isEmpty && rootNode.allPaneIds.count > 1 {
+        if sourcePane.tabs.isEmpty, rootNode.allPaneIds.count > 1 {
             closePane(sourcePaneId)
         }
     }
@@ -295,7 +312,7 @@ final class SplitViewController {
         pane.removeTab(tabId)
 
         // If pane is now empty and not the only pane, close it
-        if pane.tabs.isEmpty && rootNode.allPaneIds.count > 1 {
+        if pane.tabs.isEmpty, rootNode.allPaneIds.count > 1 {
             closePane(paneId)
         }
     }
@@ -310,14 +327,16 @@ final class SplitViewController {
         guard let currentBounds = allPaneBounds.first(where: { $0.paneId == currentPaneId })?.bounds else { return }
 
         if let targetPaneId = findBestNeighbor(from: currentBounds, currentPaneId: currentPaneId,
-                                               direction: direction, allPaneBounds: allPaneBounds) {
+                                               direction: direction, allPaneBounds: allPaneBounds)
+        {
             focusPane(targetPaneId)
         }
         // No neighbor found = at edge, do nothing
     }
 
     private func findBestNeighbor(from currentBounds: CGRect, currentPaneId: PaneID,
-                                  direction: NavigationDirection, allPaneBounds: [PaneBounds]) -> PaneID? {
+                                  direction: NavigationDirection, allPaneBounds: [PaneBounds]) -> PaneID?
+    {
         let epsilon: CGFloat = 0.001
 
         // Filter to panes in the target direction
@@ -325,10 +344,10 @@ final class SplitViewController {
             guard paneBounds.paneId != currentPaneId else { return false }
             let b = paneBounds.bounds
             switch direction {
-            case .left:  return b.maxX <= currentBounds.minX + epsilon
+            case .left: return b.maxX <= currentBounds.minX + epsilon
             case .right: return b.minX >= currentBounds.maxX - epsilon
-            case .up:    return b.maxY <= currentBounds.minY + epsilon
-            case .down:  return b.minY >= currentBounds.maxY - epsilon
+            case .up: return b.maxY <= currentBounds.minY + epsilon
+            case .down: return b.minY >= currentBounds.maxY - epsilon
             }
         }
 
@@ -403,14 +422,14 @@ final class SplitViewController {
 
     /// Find a split state by its UUID
     func findSplit(_ splitId: UUID) -> SplitState? {
-        return findSplitRecursively(in: rootNode, id: splitId)
+        findSplitRecursively(in: rootNode, id: splitId)
     }
 
     private func findSplitRecursively(in node: SplitNode, id: UUID) -> SplitState? {
         switch node {
         case .pane:
             return nil
-        case .split(let splitState):
+        case let .split(splitState):
             if splitState.id == id {
                 return splitState
             }
@@ -423,15 +442,15 @@ final class SplitViewController {
 
     /// Get all split states in the tree
     var allSplits: [SplitState] {
-        return collectSplits(from: rootNode)
+        collectSplits(from: rootNode)
     }
 
     private func collectSplits(from node: SplitNode) -> [SplitState] {
         switch node {
         case .pane:
-            return []
-        case .split(let splitState):
-            return [splitState] + collectSplits(from: splitState.first) + collectSplits(from: splitState.second)
+            []
+        case let .split(splitState):
+            [splitState] + collectSplits(from: splitState.first) + collectSplits(from: splitState.second)
         }
     }
 }
