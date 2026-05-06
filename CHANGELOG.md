@@ -12,7 +12,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- Tab single-click no longer accidentally starts a drag. The previous `NSPanGestureRecognizer` fired on the first `mouseDragged`, which on macOS happens at sub-pixel jitter — meaning a normal "click to select a tab" with even 1pt of mouse movement was misinterpreted as a drag, and SwiftUI's `.onTapGesture` never saw the click. Replaced with a custom `TabDragGestureRecognizer` that only transitions to `.began` after the cursor moves more than 3pt from the mouse-down location. Plain clicks (no movement / minor jitter) flow through to the SwiftUI host normally and trigger tab selection / close-button taps as expected.
+- Tab single-click no longer accidentally starts a drag. The previous `NSPanGestureRecognizer` fired on the first `mouseDragged`, which on macOS happens at sub-pixel jitter — meaning a normal "click to select a tab" with even 1pt of mouse movement was misinterpreted as a drag, and SwiftUI's `.onTapGesture` never saw the click. Replaced with a custom `TabDragGestureRecognizer` that only transitions to `.began` after the cursor moves more than 6pt from the mouse-down location (chosen to comfortably absorb the 4-5pt jitter typical for trackpad clicks). Plain clicks (no movement / minor jitter) flow through to the SwiftUI host normally and trigger tab selection / close-button taps as expected.
 
 ## [0.1.0] - 2026-05-05 — Smart-Byte fork initial release
 

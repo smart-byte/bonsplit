@@ -87,16 +87,19 @@ final class TabDragSourceNSView: NSView, NSDraggingSource {
 
     func installDragRecognizer() {
         // Custom NSGestureRecognizer that simulates a pan with an
-        // explicit 3pt threshold. NSPanGestureRecognizer on macOS has
+        // explicit 6pt threshold. NSPanGestureRecognizer on macOS has
         // no configurable minimumDistance and fires on the first
         // mouseDragged — even a 1pt mouse jitter during a click would
         // start a drag and rob SwiftUI's `.onTapGesture` of its
         // selection event. Holding the recognizer in `.possible` until
         // the threshold is crossed lets normal mouseDown/mouseUp
         // events fall through to the SwiftUI host unchanged, so tab
-        // selection and close-button clicks keep working.
+        // selection and close-button clicks keep working. 6pt is wide
+        // enough to absorb realistic trackpad / mouse jitter during a
+        // click (often 4-5pt) while still feeling instantaneous on a
+        // deliberate drag, which moves 20+ pt in the first frame.
         let recognizer = TabDragGestureRecognizer()
-        recognizer.threshold = 3
+        recognizer.threshold = 6
         recognizer.onDragStart = { [weak self] event in
             self?.beginDrag(with: event)
         }
@@ -206,9 +209,10 @@ final class TabDragSourceNSView: NSView, NSDraggingSource {
 /// impossible to select a tab without accidentally starting a drag.
 final class TabDragGestureRecognizer: NSGestureRecognizer {
     /// Distance in points the cursor must travel from `mouseDown`
-    /// before the recognizer fires `.began`. macOS standard for
-    /// AppKit-native drag-vs-click discrimination is ~3pt.
-    var threshold: CGFloat = 3
+    /// before the recognizer fires `.began`. 6pt accommodates the
+    /// 4-5pt jitter typical for trackpad clicks while still feeling
+    /// instantaneous on deliberate drags.
+    var threshold: CGFloat = 6
 
     /// Fired once when the recognizer transitions to `.began`. Receives
     /// the originating event so the consumer can hand it to
