@@ -129,21 +129,23 @@ struct TabBarView: View {
     // MARK: - Tab Item
 
     private func tabItem(for tab: TabItem, at index: Int) -> some View {
-        TabDragSource(
+        let onSelect = {
+            withTransaction(Transaction(animation: nil)) {
+                pane.selectTab(tab.id)
+                controller.focusPane(pane.id)
+            }
+        }
+        return TabDragSource(
             tab: tab,
             sourcePaneId: pane.id,
             controller: splitViewController,
-            preview: { AnyView(TabDragPreview(tab: tab)) }
+            preview: { AnyView(TabDragPreview(tab: tab)) },
+            onClick: onSelect
         ) {
             TabItemView(
                 tab: tab,
                 isSelected: pane.selectedTabId == tab.id,
-                onSelect: {
-                    withTransaction(Transaction(animation: nil)) {
-                        pane.selectTab(tab.id)
-                        controller.focusPane(pane.id)
-                    }
-                },
+                onSelect: onSelect,
                 onClose: {
                     withTransaction(Transaction(animation: nil)) {
                         _ = controller.closeTab(TabID(id: tab.id), inPane: pane.id)
