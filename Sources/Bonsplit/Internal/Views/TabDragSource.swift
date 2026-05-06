@@ -19,6 +19,13 @@ struct TabDragSource<Content: View>: NSViewRepresentable {
     let sourcePaneId: PaneID
     let controller: SplitViewController
     let preview: () -> AnyView
+    /// Fired on the very first `mouseDown` over the tab — runs the
+    /// host's selection action immediately, matching the macOS-native
+    /// "tabs activate on press, not on release" behaviour (Safari,
+    /// Xcode, Finder sidebar, …). The previous SwiftUI `.onTapGesture`
+    /// only fired on `mouseUp` and produced a perceptible delay
+    /// between press and selection.
+    let onClick: () -> Void
     @ViewBuilder let content: () -> Content
 
     func makeNSView(context _: Context) -> TabDragSourceNSView {
@@ -27,7 +34,8 @@ struct TabDragSource<Content: View>: NSViewRepresentable {
             tab: tab,
             sourcePaneId: sourcePaneId,
             controller: controller,
-            previewBuilder: preview
+            previewBuilder: preview,
+            onClick: onClick
         )
         view.embed(content: content())
         view.installDragRecognizer()
@@ -39,7 +47,8 @@ struct TabDragSource<Content: View>: NSViewRepresentable {
             tab: tab,
             sourcePaneId: sourcePaneId,
             controller: controller,
-            previewBuilder: preview
+            previewBuilder: preview,
+            onClick: onClick
         )
         nsView.refresh(content: content())
     }
@@ -54,18 +63,34 @@ final class TabDragSourceNSView: NSView, NSDraggingSource {
     private var sourcePaneId: PaneID?
     private weak var controller: SplitViewController?
     private var previewBuilder: (() -> AnyView)?
+    private var onClick: (() -> Void)?
     private var host: NSHostingView<AnyView>?
 
     func update(
         tab: TabItem,
         sourcePaneId: PaneID,
         controller: SplitViewController,
-        previewBuilder: @escaping () -> AnyView
+        previewBuilder: @escaping () -> AnyView,
+        onClick: @escaping () -> Void
     ) {
         self.tab = tab
         self.sourcePaneId = sourcePaneId
         self.controller = controller
         self.previewBuilder = previewBuilder
+        self.onClick = onClick
+    }
+
+    // MARK: - Press-to-select
+
+    override func mouseDown(with event: NSEvent) {
+        // macOS-native tab selection fires on press (Safari / Xcode /
+        // Finder sidebar all do this), not on release. SwiftUI's
+        // `.onTapGesture` would only fire after `mouseUp` and produced
+        // a perceptible delay. Calling super first lets the responder
+        // chain (and our drag-threshold recognizer) handle the event
+        // afterwards as usual.
+        super.mouseDown(with: event)
+        onClick?()
     }
 
     func embed(content: some View) {

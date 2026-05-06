@@ -44,9 +44,10 @@ struct TabItemView: View {
         .padding(.bottom, isSelected ? 1 : 0)
         .background(tabBackground)
         .contentShape(Rectangle())
-        .onTapGesture {
-            onSelect()
-        }
+        // Selection is wired via TabDragSource.onClick which fires on
+        // mouseDown — Apple-native tab activation. `onSelect` stays in
+        // the API as a fallback hook so existing callers don't need to
+        // restructure, but no SwiftUI tap recognizer is attached here.
         .onHover { hovering in
             withAnimation(.easeInOut(duration: TabBarMetrics.hoverDuration)) {
                 isHovered = hovering

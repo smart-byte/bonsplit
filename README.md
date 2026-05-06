@@ -1,4 +1,14 @@
+<div align="center">
+
 # Bonsplit (Smart-Byte fork)
+
+[![macOS](https://img.shields.io/badge/macOS-14.0%2B-blue?logo=apple&logoColor=white)](https://www.apple.com/macos/)
+[![Swift](https://img.shields.io/badge/Swift-5.9%2B-orange?logo=swift&logoColor=white)](https://swift.org)
+[![Xcode](https://img.shields.io/badge/Xcode-15%2B-blue?logo=xcode&logoColor=white)](https://developer.apple.com/xcode/)
+[![License](https://img.shields.io/badge/License-MIT-green)](LICENSE)
+[![Version](https://img.shields.io/badge/Version-0.1.2-lightgrey)](https://github.com/smart-byte/bonsplit/releases)
+
+</div>
 
 A native macOS tab bar library with split-pane support for SwiftUI
 applications.
@@ -57,12 +67,6 @@ See `CHANGELOG.md` for the per-release breakdown.
 - Delegate callbacks for all tab and pane events
 - Keyboard navigation between panes
 - Optional macOS-like tab state preservation (scroll position, focus, @State)
-
-## Requirements
-
-- macOS 14.0+
-- Swift 5.9+
-- Xcode 15.0+
 
 ## Installation
 
