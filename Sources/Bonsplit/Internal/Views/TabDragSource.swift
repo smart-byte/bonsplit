@@ -30,7 +30,7 @@ struct TabDragSource<Content: View>: NSViewRepresentable {
             previewBuilder: preview
         )
         view.embed(content: content())
-        view.installPanRecognizer()
+        view.installDragRecognizer()
         return view
     }
 
@@ -85,20 +85,25 @@ final class TabDragSourceNSView: NSView, NSDraggingSource {
         host?.rootView = AnyView(content)
     }
 
-    func installPanRecognizer() {
-        // NSPanGestureRecognizer fires once the user has dragged past the
-        // system's drag threshold (~3pt). Plain mouseDown/mouseUp still
-        // pass through to the SwiftUI host so tab clicks (select/close)
-        // keep working unchanged.
-        let pan = NSPanGestureRecognizer(target: self, action: #selector(handlePan(_:)))
-        addGestureRecognizer(pan)
-    }
-
-    @objc private func handlePan(_ recognizer: NSPanGestureRecognizer) {
-        guard recognizer.state == .began,
-              let event = NSApp.currentEvent
-        else { return }
-        beginDrag(with: event)
+    func installDragRecognizer() {
+        // Custom NSGestureRecognizer that simulates a pan with an
+        // explicit 6pt threshold. NSPanGestureRecognizer on macOS has
+        // no configurable minimumDistance and fires on the first
+        // mouseDragged — even a 1pt mouse jitter during a click would
+        // start a drag and rob SwiftUI's `.onTapGesture` of its
+        // selection event. Holding the recognizer in `.possible` until
+        // the threshold is crossed lets normal mouseDown/mouseUp
+        // events fall through to the SwiftUI host unchanged, so tab
+        // selection and close-button clicks keep working. 6pt is wide
+        // enough to absorb realistic trackpad / mouse jitter during a
+        // click (often 4-5pt) while still feeling instantaneous on a
+        // deliberate drag, which moves 20+ pt in the first frame.
+        let recognizer = TabDragGestureRecognizer()
+        recognizer.threshold = 6
+        recognizer.onDragStart = { [weak self] event in
+            self?.beginDrag(with: event)
+        }
+        addGestureRecognizer(recognizer)
     }
 
     private func beginDrag(with event: NSEvent) {
@@ -186,5 +191,72 @@ final class TabDragSourceNSView: NSView, NSDraggingSource {
         }
         controller.draggingTab = nil
         controller.dragSourcePaneId = nil
+    }
+}
+
+// MARK: - Custom drag-threshold gesture recognizer
+
+/// `NSGestureRecognizer` subclass that behaves like
+/// `NSPanGestureRecognizer` but only transitions to `.began` once the
+/// cursor has moved beyond `threshold` points from the mouse-down
+/// location. While the recognizer is in `.possible`, mouse events
+/// continue to flow through to the view's normal responder chain —
+/// in particular, SwiftUI's `.onTapGesture` keeps firing for short
+/// clicks even if the cursor jitters by 1–2 px during the click.
+///
+/// Default macOS `NSPanGestureRecognizer` has no configurable minimum
+/// distance and fires on the first `mouseDragged`, which made it
+/// impossible to select a tab without accidentally starting a drag.
+final class TabDragGestureRecognizer: NSGestureRecognizer {
+    /// Distance in points the cursor must travel from `mouseDown`
+    /// before the recognizer fires `.began`. 6pt accommodates the
+    /// 4-5pt jitter typical for trackpad clicks while still feeling
+    /// instantaneous on deliberate drags.
+    var threshold: CGFloat = 6
+
+    /// Fired once when the recognizer transitions to `.began`. Receives
+    /// the originating event so the consumer can hand it to
+    /// `beginDraggingSession(with:event:source:)`.
+    var onDragStart: ((NSEvent) -> Void)?
+
+    private var startPoint: NSPoint?
+
+    override func mouseDown(with event: NSEvent) {
+        startPoint = event.locationInWindow
+        state = .possible
+    }
+
+    override func mouseDragged(with event: NSEvent) {
+        guard let start = startPoint else { return }
+        let dx = event.locationInWindow.x - start.x
+        let dy = event.locationInWindow.y - start.y
+        if dx * dx + dy * dy >= threshold * threshold {
+            // Crossed the threshold — promote to .began so AppKit
+            // routes subsequent events to us. The drag session itself
+            // is started immediately via the callback so the source
+            // view's drag-image fly-along feels instantaneous.
+            state = .began
+            onDragStart?(event)
+        }
+    }
+
+    override func mouseUp(with _: NSEvent) {
+        // Click finished without crossing the threshold — fail the
+        // recognizer so AppKit knows we never really started a
+        // gesture. SwiftUI's `.onTapGesture` already received its
+        // mouseDown/mouseUp pair through the normal responder chain
+        // while we sat in `.possible`, so the tab selection has
+        // already fired by this point.
+        if state == .possible {
+            state = .failed
+        } else {
+            state = .ended
+        }
+        startPoint = nil
+    }
+
+    override func reset() {
+        super.reset()
+        startPoint = nil
     }
 }
