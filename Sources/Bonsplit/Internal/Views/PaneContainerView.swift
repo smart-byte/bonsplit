@@ -126,26 +126,16 @@ struct PaneContainerView<Content: View, EmptyContent: View>: View {
                 }
 
             case .keepAllAlive:
-                // macOS-like behavior: keep all tab views in hierarchy.
-                //
-                // `.opacity(0)` + `.allowsHitTesting(false)` only stop
-                // SwiftUI gestures from reaching inactive tabs — AppKit's
-                // NSDragging routes to the topmost NSView registered for
-                // the dragged types regardless of those modifiers, so a
-                // file drop targeted at the visible tab can silently land
-                // on a layered inactive NSCollectionView / NSView. The
-                // `inactiveTabHidden` modifier wraps the content in a
-                // hidden() so the underlying NSHostingView reports
-                // `isHidden = true` to AppKit and drops route to the
-                // visible tab as expected.
+                // Keep state and native views alive, but freeze inactive
+                // content sizes at a hosting boundary. Native hiding inside
+                // that boundary also keeps AppKit file drops on the active tab.
                 ZStack {
                     ForEach(pane.tabs) { tab in
                         let isActive = tab.id == pane.selectedTabId
-                        contentBuilder(tab, pane.id)
+                        RetainedTabContent(isActive: isActive, content: contentBuilder(tab, pane.id))
                             .frame(maxWidth: .infinity, maxHeight: .infinity)
                             .opacity(isActive ? 1 : 0)
                             .allowsHitTesting(!isDragging && isActive)
-                            .modifier(InactiveTabHidden(isHidden: !isActive))
                     }
                 }
             }
@@ -209,23 +199,6 @@ struct PaneContainerView<Content: View, EmptyContent: View>: View {
     private var emptyPaneView: some View {
         emptyPaneBuilder(pane.id)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
-    }
-}
-
-/// Conditionally wraps the content in `.hidden()`. SwiftUI's
-/// `.hidden()` propagates to the underlying `NSHostingView`'s
-/// `isHidden = true`, which is the only signal that takes inactive
-/// tabs out of AppKit's NSDragging routing. `.opacity(0)` alone leaves
-/// the NSView visible to drag-and-drop and silently misroutes drops.
-private struct InactiveTabHidden: ViewModifier {
-    let isHidden: Bool
-
-    func body(content: Content) -> some View {
-        if isHidden {
-            content.hidden()
-        } else {
-            content
-        }
     }
 }
 
