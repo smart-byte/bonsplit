@@ -6,6 +6,10 @@ struct TabItemView: View {
     let isSelected: Bool
     let onSelect: () -> Void
     let onClose: () -> Void
+    /// Optional host-provided accessory rendered trailing after the
+    /// title. Resolved by the parent so this view stays decoupled from
+    /// `BonsplitController`.
+    var accessory: AnyView?
     /// Optional context-menu provider. Routed in by the parent so this
     /// view stays decoupled from `BonsplitController`.
     var contextMenuContent: (() -> AnyView)?
@@ -27,6 +31,21 @@ struct TabItemView: View {
                 .font(.system(size: TabBarMetrics.titleFontSize))
                 .lineLimit(1)
                 .foregroundStyle(isSelected ? TabBarColors.activeText : TabBarColors.inactiveText)
+
+            // Host-provided accessory (e.g. a badge that opens a
+            // popover). It keeps its ideal width (`fixedSize` +
+            // `layoutPriority`) so a long title truncates before the
+            // accessory gets squeezed; the height clamp keeps a tall
+            // accessory from growing the fixed-height tab. No gesture
+            // handling here — clicks reach the accessory through the
+            // hosting view exactly like they reach the close button,
+            // and drags only start past the drag-threshold recognizer.
+            if let accessory {
+                accessory
+                    .fixedSize()
+                    .layoutPriority(1)
+                    .frame(maxHeight: TabBarMetrics.tabHeight)
+            }
 
             Spacer(minLength: 4)
 

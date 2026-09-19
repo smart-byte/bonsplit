@@ -151,6 +151,7 @@ struct TabBarView: View {
                         _ = controller.closeTab(TabID(id: tab.id), inPane: pane.id)
                     }
                 },
+                accessory: accessoryView(for: tab),
                 contextMenuContent: contextMenuBuilder(for: tab)
             )
         }
@@ -166,6 +167,14 @@ struct TabBarView: View {
                 dropIndicator
             }
         }
+    }
+
+    /// Resolves the host-provided accessory for a tab. `nil` when no
+    /// hook is installed or the host returns no view for this tab —
+    /// the tab then renders exactly as before.
+    private func accessoryView(for tab: TabItem) -> AnyView? {
+        guard let provider = controller.tabAccessory else { return nil }
+        return provider(Tab(from: tab), pane.id)
     }
 
     /// Returning `nil` when no host hook is installed yields no
