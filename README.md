@@ -31,6 +31,7 @@ Public API additions on top of upstream `1.1.1`:
 - `BonsplitController.onForeignTabDrop` — for tab drops whose source pane lives in a different controller (i.e. another window). Enables seamless tab moves between windows without polling.
 - `BonsplitController.onUnacceptedDragEnd` — fires when a drag ends without any drop receiver consuming it. Lets the host implement tear-off into a new window.
 - `BonsplitController.onTabContextMenu` — host-supplied SwiftUI context-menu builder per tab.
+- `BonsplitController.tabAccessory` — host-supplied per-tab accessory view (`(Tab, PaneID) -> AnyView?`), rendered trailing after the title. Return `nil` for no accessory. A pure view slot for badges or popover anchors — interactive content works, tab height never changes, and long titles truncate before the accessory shrinks.
 - `BonsplitController.insertExistingTab(...)` — preserve a `TabID` across controllers so host-side state keyed on it can follow the move.
 - `PaneID.id` and `TabID.id` are now public so hosts can map Bonsplit identities to their own registries.
 - `BonsplitDelegate` is `@MainActor`-isolated for Swift 6 strict concurrency.

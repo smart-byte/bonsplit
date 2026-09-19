@@ -8,6 +8,12 @@ version line at `0.1.0`.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.0] - 2026-09-19
+
+### Added
+
+- `BonsplitController.tabAccessory: ((Tab, PaneID) -> AnyView?)?` — host-supplied per-tab accessory view rendered trailing after the title (vertically centered, standard content spacing as gap). A pure view slot with no Bonsplit semantics: badges, popover anchors, etc. Interactive content works — clicks reach the accessory through the hosting view like they reach the close button, and drags still only start past the 6pt threshold. Accessories never change the tab height; when space is tight the title truncates before the accessory shrinks (`fixedSize` + `layoutPriority`). Returning `nil` (per tab, or leaving the hook nil) renders the tab exactly as before.
+
 ## [0.1.2] - 2026-05-06
 
 ### Changed

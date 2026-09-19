@@ -63,6 +63,23 @@ public final class BonsplitController {
     /// cascade through every consumer.
     public var onTabContextMenu: ((Tab, _ paneId: PaneID) -> AnyView)?
 
+    /// Builds an optional accessory view rendered inside a tab item,
+    /// trailing after the title. Return `nil` (or leave the whole hook
+    /// nil) for no accessory on that tab.
+    ///
+    /// The accessory is purely a view slot — Bonsplit attaches no
+    /// semantics to it. Typical uses are small status badges or
+    /// popover anchors. Interactive content (buttons, popovers) works:
+    /// clicks flow through to the accessory the same way they reach
+    /// the tab's close button, and drags only start past the usual
+    /// movement threshold. The accessory never changes the tab height;
+    /// when space is tight the title truncates before the accessory
+    /// shrinks.
+    ///
+    /// `AnyView` for the same reason as `onTabContextMenu`: arbitrary
+    /// host content without forcing generics onto this class.
+    public var tabAccessory: ((Tab, _ paneId: PaneID) -> AnyView?)?
+
     // MARK: - Initialization
 
     /// Create a new controller with the specified configuration
