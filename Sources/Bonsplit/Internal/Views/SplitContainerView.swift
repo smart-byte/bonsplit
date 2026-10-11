@@ -57,6 +57,8 @@ struct SplitContainerView<Content: View, EmptyContent: View>: NSViewRepresentabl
 
             // Track that we're animating (skip delegate position updates)
             context.coordinator.isAnimating = true
+            // The animation owns the position from here on.
+            context.coordinator.hasAppliedInitialPosition = true
         }
 
         // Wait for view to be added to window
@@ -102,6 +104,7 @@ struct SplitContainerView<Content: View, EmptyContent: View>: NSViewRepresentabl
                 // No animation - just set the position
                 let position = availableSize * splitState.dividerPosition
                 context.coordinator.setPositionSafely(position, in: splitView, layout: false)
+                context.coordinator.hasAppliedInitialPosition = true
             }
         }
 
@@ -188,6 +191,10 @@ struct SplitContainerView<Content: View, EmptyContent: View>: NSViewRepresentabl
         var isSyncingProgrammatically = false
         /// Track if user is actively dragging the divider
         var isDragging = false
+        /// False until the first layout pass with a real size has applied the model's
+        /// divider position. NSSplitView's own initial layout splits the space evenly;
+        /// reading that back into the model would overwrite a position the host restored.
+        var hasAppliedInitialPosition = false
         /// UUID of the split node currently mounted in each child hosting
         /// view, keyed by the view's identity. Lets `updateHostingView`
         /// skip the AnyView-wrapping rootView swap when the underlying
@@ -271,6 +278,14 @@ struct SplitContainerView<Content: View, EmptyContent: View>: NSViewRepresentabl
             let availableSize = max(totalSize - splitView.dividerThickness, 0)
 
             guard availableSize > 0 else { return }
+
+            // First layout with a real size: apply the model instead of reading the even split back.
+            if !hasAppliedInitialPosition {
+                hasAppliedInitialPosition = true
+                setPositionSafely(availableSize * splitState.dividerPosition, in: splitView, layout: false)
+                lastAppliedPosition = splitState.dividerPosition
+                return
+            }
 
             if let firstSubview = splitView.arrangedSubviews.first {
                 let dividerPosition = splitState.orientation == .horizontal

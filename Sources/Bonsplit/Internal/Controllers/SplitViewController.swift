@@ -77,12 +77,13 @@ final class SplitViewController {
     // MARK: - Split Operations
 
     /// Split the specified pane in the given orientation
-    func splitPane(_ paneId: PaneID, orientation: SplitOrientation, with newTab: TabItem? = nil) {
+    func splitPane(_ paneId: PaneID, orientation: SplitOrientation, with newTab: TabItem? = nil, dividerPosition: CGFloat? = nil) {
         rootNode = splitNodeRecursively(
             node: rootNode,
             targetPaneId: paneId,
             orientation: orientation,
-            newTab: newTab
+            newTab: newTab,
+            dividerPosition: dividerPosition
         )
     }
 
@@ -90,7 +91,8 @@ final class SplitViewController {
         node: SplitNode,
         targetPaneId: PaneID,
         orientation: SplitOrientation,
-        newTab: TabItem?
+        newTab: TabItem?,
+        dividerPosition: CGFloat?
     ) -> SplitNode {
         switch node {
         case let .pane(paneState):
@@ -102,13 +104,15 @@ final class SplitViewController {
                     PaneState(tabs: [])
                 }
 
-                // Start with divider at the edge so there's no flash before animation
+                // Start with divider at the edge so there's no flash before animation. A caller that
+                // knows the divider position (a restored layout) gets a split that is born settled
+                // there instead: no edge placeholder, no entry animation.
                 let splitState = SplitState(
                     orientation: orientation,
                     first: .pane(paneState),
                     second: .pane(newPane),
-                    dividerPosition: 1.0, // Start at edge (will animate to 0.5)
-                    animationOrigin: .fromSecond // New pane slides in from right/bottom
+                    dividerPosition: dividerPosition ?? 1.0, // Start at edge (will animate to 0.5)
+                    animationOrigin: dividerPosition == nil ? .fromSecond : nil // New pane slides in from right/bottom
                 )
 
                 // Focus the new pane
@@ -123,13 +127,15 @@ final class SplitViewController {
                 node: splitState.first,
                 targetPaneId: targetPaneId,
                 orientation: orientation,
-                newTab: newTab
+                newTab: newTab,
+                dividerPosition: dividerPosition
             )
             splitState.second = splitNodeRecursively(
                 node: splitState.second,
                 targetPaneId: targetPaneId,
                 orientation: orientation,
-                newTab: newTab
+                newTab: newTab,
+                dividerPosition: dividerPosition
             )
             return .split(splitState)
         }
