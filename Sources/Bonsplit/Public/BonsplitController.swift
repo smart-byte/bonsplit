@@ -292,12 +292,17 @@ public final class BonsplitController {
     ///   - paneId: Optional pane to split (defaults to focused pane)
     ///   - orientation: Direction to split (horizontal = side-by-side, vertical = stacked)
     ///   - tab: Optional tab to add to the new pane
+    ///   - dividerPosition: Optional settled divider position (0.1-0.9, clamped). When given, the
+    ///     split is created at that position without the entry animation, which is what restoring
+    ///     a saved layout needs. Omit it for the interactive behavior: the divider slides in from
+    ///     the edge to 0.5.
     /// - Returns: The new pane ID, or nil if vetoed by delegate
     @discardableResult
     public func splitPane(
         _ paneId: PaneID? = nil,
         orientation: SplitOrientation,
-        withTab tab: Tab? = nil
+        withTab tab: Tab? = nil,
+        dividerPosition: CGFloat? = nil
     ) -> PaneID? {
         guard configuration.allowSplits else { return nil }
 
@@ -319,7 +324,8 @@ public final class BonsplitController {
         internalController.splitPane(
             PaneID(id: targetPaneId.id),
             orientation: orientation,
-            with: internalTab
+            with: internalTab,
+            dividerPosition: dividerPosition.map { Self.clampedDividerPosition($0) }
         )
 
         // Find new pane (will be focused after split)
@@ -531,9 +537,7 @@ public final class BonsplitController {
             internalController.isExternalUpdateInProgress = true
         }
 
-        // Clamp position to valid range
-        let clampedPosition = min(max(position, 0.1), 0.9)
-        split.dividerPosition = clampedPosition
+        split.dividerPosition = Self.clampedDividerPosition(position)
 
         if fromExternal {
             // Use a slight delay to allow the UI to update before re-enabling notifications
@@ -573,6 +577,11 @@ public final class BonsplitController {
     }
 
     // MARK: - Private Helpers
+
+    /// The range a divider can rest in; shared by `setDividerPosition` and `splitPane`.
+    private static func clampedDividerPosition(_ position: CGFloat) -> CGFloat {
+        min(max(position, 0.1), 0.9)
+    }
 
     private func findTabInternal(_ tabId: TabID) -> (PaneState, Int)? {
         for pane in internalController.rootNode.allPanes {

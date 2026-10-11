@@ -32,6 +32,7 @@ Public API additions on top of upstream `1.1.1`:
 - `BonsplitController.onUnacceptedDragEnd` — fires when a drag ends without any drop receiver consuming it. Lets the host implement tear-off into a new window.
 - `BonsplitController.onTabContextMenu` — host-supplied SwiftUI context-menu builder per tab.
 - `BonsplitController.tabAccessory` — host-supplied per-tab accessory view (`(Tab, PaneID) -> AnyView?`), rendered trailing after the title. Return `nil` for no accessory. A pure view slot for badges or popover anchors — interactive content works, tab height never changes, and long titles truncate before the accessory shrinks.
+- `BonsplitController.splitPane(_:orientation:withTab:dividerPosition:)` — optional divider position: the new split is created settled there (clamped to 0.1–0.9) with no entry animation, so a host can rebuild a saved layout with its divider ratios intact.
 - `BonsplitController.insertExistingTab(...)` — preserve a `TabID` across controllers so host-side state keyed on it can follow the move.
 - `PaneID.id` and `TabID.id` are now public so hosts can map Bonsplit identities to their own registries.
 - `BonsplitDelegate` is `@MainActor`-isolated for Swift 6 strict concurrency.
@@ -48,6 +49,7 @@ Layout stability:
 - Exact 50/50 split arithmetic accounts for divider thickness so the divider lands on the actual midpoint after rounding.
 - 0.5pt hysteresis on container-width tracking eliminates body re-render every frame on sub-pixel window resize.
 - `SplitAnimator` uses `nonisolated(unsafe)` on `CVDisplayLink` so its nonisolated `deinit` can stop the link without crossing actor isolation.
+- A split mounted without an entry animation applies its model divider position on the first real layout instead of reading `NSSplitView`'s even initial split back into the model.
 
 Defaults:
 
@@ -168,6 +170,9 @@ controller.splitPane(paneId, orientation: .horizontal)
 
 // Split with a tab already in the new pane
 controller.splitPane(orientation: .horizontal, withTab: Tab(title: "New", icon: "doc"))
+
+// Restore a saved layout: the split is created settled at 30%, with no entry animation
+controller.splitPane(paneId, orientation: .horizontal, dividerPosition: 0.3)
 
 // Close a pane
 controller.closePane(paneId)
